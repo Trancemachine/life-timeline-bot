@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+config/config.yaml
+temp_*.json
+*.swp
+.DS_Store

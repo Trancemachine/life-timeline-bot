@@ -1,0 +1,215 @@
+"""NLP 解析：从用户消息中提取日期时间、事件内容、项目归类"""
+
+import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any
+
+from config.config import get_config
+
+CURRENT_YEAR = datetime.now().year
+
+
+@dataclass
+class ParsedEvent:
+    """解析结果"""
+
+    date_start: str  # "2025-04-22" 或 "2025-04-22 10:00"
+    date_end: str | None  # "2025-04-22 12:00" 或 None
+    is_all_day: bool  # 是否全天事件
+    content: str  # 事件描述（去除日期前缀）
+    raw_content: str  # 原始内容
+    project: str | None  # 匹配到的项目名
+    project_confidence: float  # 匹配置信度 0-1
+
+
+def parse_message(text: str) -> ParsedEvent:
+    """解析用户消息，提取日期、内容和项目"""
+    raw = text.strip()
+
+    # 1. 提取日期时间
+    date_start, date_end, is_all_day, rest = _extract_datetime(raw)
+
+    # 2. 剩余文本就是事件内容
+    content = rest.strip()
+
+    # 3. 匹配项目
+    project, confidence = _match_project(content)
+
+    return ParsedEvent(
+        date_start=date_start,
+        date_end=date_end,
+        is_all_day=is_all_day,
+        content=content,
+        raw_content=raw,
+        project=project,
+        project_confidence=confidence,
+    )
+
+
+def parse_timeline_query(text: str) -> str | None:
+    """
+    判断是否是查询时间线请求。
+    返回匹配到的项目名，如果不是查询请求则返回 None。
+    """
+    text = text.strip()
+
+    # "时间线" / "时间轴" / "timeline" / "历程" / "时间表"
+    m = re.search(r"(.+?)(?:时间线|时间轴|timeline|历程|时间表)", text, re.I)
+    if m:
+        candidate = m.group(1).strip()
+        return candidate if len(candidate) <= 10 else None
+
+    # "查一下XX" / "查看XX"
+    m = re.search(r"(?:查[看一]?下?|看看|显示|列出)\s*(.+)", text)
+    if m:
+        return m.group(1).strip()
+
+    return None
+
+
+def _extract_datetime(text: str) -> tuple[str, str | None, bool, str]:
+    """
+    从文本中提取日期时间和范围，返回:
+    (date_start, date_end, is_all_day, rest_text)
+    支持从左到右第一次出现的日期。
+    """
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    rest = text
+
+    # ── 复合时间范围：今天/昨天/前天 H点到H点 ──
+    #    eg: "今天10点到12点做了X" → range 10:00-12:00, today
+    m = re.match(
+        r"(今天|昨天|前天|今日|昨日)\s*"
+        r"(上午|下午|早上|中午|晚上)?\s*"
+        r"(\d{1,2})[点:：](\d{2})?\s*(?:到|-|~|—|,)\s*"
+        r"(上午|下午|早上|中午|晚上)?\s*"
+        r"(\d{1,2})[点:：](\d{2})?",
+        text,
+    )
+    if m:
+        rel = m.group(1)
+        ampm_start = m.group(2) or ""
+        h1, mi1 = int(m.group(3)), int(m.group(4) or 0)
+        ampm_end = m.group(5) or ""
+        h2, mi2 = int(m.group(6)), int(m.group(7) or 0)
+        base = _relative_date(rel, today)
+        h1 += 12 if ampm_start in ("下午", "晚上") and h1 < 12 else 0
+        h2 += 12 if ampm_end in ("下午", "晚上") and h2 < 12 else 0
+        start = base.replace(hour=h1, minute=mi1)
+        end = base.replace(hour=h2, minute=mi2)
+        rest = text[m.end() :]
+        return start.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M"), False, rest
+
+    # ── M.D号/月D日 H点-H点 ──
+    m = re.match(
+        r"(\d{1,2})[.月/](\d{1,2})日?号?\s*"
+        r"(上午|下午|早上|中午|晚上)?\s*"
+        r"(\d{1,2})[点:：](\d{2})?\s*(?:到|-|~|—|,)\s*"
+        r"(上午|下午|早上|中午|晚上)?\s*"
+        r"(\d{1,2})[点:：](\d{2})?",
+        text,
+    )
+    if m:
+        month, day = int(m.group(1)), int(m.group(2))
+        ampm_start = m.group(3) or ""
+        h1, mi1 = int(m.group(4)), int(m.group(5) or 0)
+        ampm_end = m.group(6) or ""
+        h2, mi2 = int(m.group(7)), int(m.group(8) or 0)
+        dt = datetime(CURRENT_YEAR, month, day)
+        h1 += 12 if ampm_start in ("下午", "晚上") and h1 < 12 else 0
+        h2 += 12 if ampm_end in ("下午", "晚上") and h2 < 12 else 0
+        start = dt.replace(hour=h1, minute=mi1)
+        end = dt.replace(hour=h2, minute=mi2)
+        rest = text[m.end() :]
+        return start.strftime("%Y-%m-%d %H:%M"), end.strftime("%Y-%m-%d %H:%M"), False, rest
+
+    # ── 今天/昨天/前天 H点 ──
+    m = re.match(
+        r"(今天|昨天|前天|今日|昨日)\s*"
+        r"(上午|下午|早上|中午|晚上)?\s*"
+        r"(\d{1,2})[点:：](\d{2})?",
+        text,
+    )
+    if m:
+        rel = m.group(1)
+        ampm = m.group(2) or ""
+        hour, minute = int(m.group(3)), int(m.group(4) or 0)
+        base = _relative_date(rel, today)
+        hour += 12 if ampm in ("下午", "晚上") and hour < 12 else 0
+        if ampm in ("中午") and hour < 12:
+            hour += 12
+        dt = base.replace(hour=hour, minute=minute)
+        rest = text[m.end() :]
+        return dt.strftime("%Y-%m-%d %H:%M"), None, False, rest
+
+    # ── M.D号 H点 ──
+    m = re.match(
+        r"(\d{1,2})[.月/](\d{1,2})日?号?\s*"
+        r"(上午|下午|早上|中午|晚上)?\s*"
+        r"(\d{1,2})[点:：](\d{2})?",
+        text,
+    )
+    if m:
+        month, day = int(m.group(1)), int(m.group(2))
+        ampm = m.group(3) or ""
+        hour, minute = int(m.group(4)), int(m.group(5) or 0)
+        dt = datetime(CURRENT_YEAR, month, day)
+        hour += 12 if ampm in ("下午", "晚上") and hour < 12 else 0
+        dt = dt.replace(hour=hour, minute=minute)
+        rest = text[m.end() :]
+        return dt.strftime("%Y-%m-%d %H:%M"), None, False, rest
+
+    # ── M.D号（纯日期）──
+    m = re.match(r"(\d{1,2})[.月/](\d{1,2})日?号?", text)
+    if m:
+        month, day = int(m.group(1)), int(m.group(2))
+        dt = datetime(CURRENT_YEAR, month, day)
+        rest = text[m.end() :]
+        return dt.strftime("%Y-%m-%d"), None, True, rest
+
+    # ── 今天/昨天/前天（纯日期）──
+    m = re.match(r"(今天|昨天|前天|今日|昨日)", text)
+    if m:
+        rel = m.group(1)
+        dt = _relative_date(rel, today)
+        rest = text[m.end() :]
+        return dt.strftime("%Y-%m-%d"), None, True, rest
+
+    # ── 无日期 → 默认今天 ──
+    return today.strftime("%Y-%m-%d"), None, True, text
+
+
+def _relative_date(rel: str, today: datetime) -> datetime:
+    mapping = {"今天": 0, "今日": 0, "昨天": -1, "昨日": -1, "前天": -2}
+    return today + timedelta(days=mapping.get(rel, 0))
+
+
+def _match_project(content: str) -> tuple[str | None, float]:
+    """
+    通过关键词匹配项目。
+    返回 (project_name, confidence)，confidence 0-1
+    """
+    cfg = get_config()
+    projects = cfg.get("projects", [])
+
+    best_project = None
+    best_score = 0.0
+
+    for proj in projects:
+        name = proj["name"]
+        keywords = proj.get("keywords", [])
+        if not keywords:
+            continue
+        hits = sum(1 for kw in keywords if kw in content)
+        if hits > 0:
+            score = hits / len(keywords)
+            # 开头/结尾匹配加分
+            for kw in keywords:
+                if content.strip().startswith(kw) or content.strip().endswith(kw):
+                    score += 0.3
+            if score > best_score:
+                best_score = score
+                best_project = name
+
+    return best_project, min(best_score, 1.0)

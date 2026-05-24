@@ -1,0 +1,29 @@
+# 飞书应用配置
+app_id: "cli_xxxxxxxxxxxxxxx"
+app_secret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# 飞书 Base 配置（创建好 Base 后填写）
+base_app_token: "xxxxxxxx"  # 多维表格的 app_token
+event_table_id: "tblxxxxxxxxxx"  # 事件表 ID
+project_table_id: "tblxxxxxxxxxx"  # 项目表 ID
+
+# 飞书 Calendar 配置
+calendar_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxx"  # 个人日历 ID（留空自动用默认日历）
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+# NLP 关键词映射（用于自动归类项目）
+projects:
+  - name: "考驾照"
+    keywords: ["科二", "科三", "科目", "驾考", "学车", "驾照", "练车", "驾校"]
+  - name: "找工作"
+    keywords: ["面试", "面了", "投简历", "offer", "笔试", "面经", "招聘"]
+  - name: "健身"
+    keywords: ["健身", "拉背", "卧推", "深蹲", "撸铁", "有氧", "跑步"]
+  - name: "法务"
+    keywords: ["法院", "诉讼", "律师", "立案", "起诉", "法律"]
+  - name: "学习"
+    keywords: ["学了", "看书", "阅读", "听课", "学习", "复习"]
