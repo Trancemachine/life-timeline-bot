@@ -47,12 +47,16 @@ git push -u origin main
 
 ### 2.3 配置环境变量
 
-在部署页面点 `Environment Variables`，添加以下 2 个：
+在部署页面点 `Environment Variables`，添加以下 6 个：
 
 | Name | Value |
 |------|-------|
 | `FEISHU_APP_ID` | `cli_aa8b536a13791cb5` |
 | `FEISHU_APP_SECRET` | `e1IB8HDhsuDu5Ze6v5eXrlCxOmItQg5K` |
+| `FEISHU_BASE_TOKEN` | `T35sbKGYga8LF0szmECc72pOnbb` |
+| `FEISHU_EVENT_TABLE_ID` | `tblFHJR46ABafFCh` |
+| `FEISHU_PROJECT_TABLE_ID` | `tblKk3IrM28O25X3` |
+| `FEISHU_CALENDAR_ID` | （留空自动用主日历） |
 
 不要勾选 "Use in Preview" 和 "Use in Development"，只勾 **Production**
 
@@ -150,8 +154,17 @@ https://life-timeline-bot.vercel.app
 
 ---
 
-## 六、配置自定义项目归类
+## 六、将 Base 分享给机器人
+
+Bot 代码运行在 Vercel 上，使用 app_id+app_secret（bot 身份）访问飞书 API。Base 需要授权给 bot 才能读写：
+
+1. 打开 Base 链接：**https://my.feishu.cn/base/T35sbKGYga8LF0szmECc72pOnbb**
+2. 点右上角「共享」
+3. 搜索你的机器人应用名称 → 添加为「编辑者」
+4. 保存
+
+## 七、配置自定义项目归类
 
 编辑 `config/config.example.yaml` 里的 `projects` 段，可以自定义项目关键词。
 
-在 Vercel 上部署时如果改了关键词，手动更新 `src/nlp.py` 里的 `_match_project` 函数用到的配置，或者通过环境变量 `PROJECTS_CONFIG` 传入 JSON。
+在 Vercel 上部署时如果改了关键词，手动更新 `src/nlp.py` 里的 `_match_project` 函数用到的配置，或者通过环境变量传入 JSON。

@@ -25,6 +25,7 @@ class FeishuClient:
         cfg = get_config()
         self._app_id = cfg["app_id"]
         self._app_secret = cfg["app_secret"]
+        self._base_token = cfg.get("base_app_token", "")
 
     # ── Token 管理 ──────────────────────────────────────────
 

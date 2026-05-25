@@ -266,7 +266,7 @@ def _create_calendar_event(parsed):
     """将解析结果写入飞书日历"""
     try:
         cfg = get_config()
-        if not cfg.get("calendar_id") and not cfg.get("calendar_id"):
+        if not cfg.get("calendar_id"):
             # 没有配置日历 ID，跳过
             return
 
