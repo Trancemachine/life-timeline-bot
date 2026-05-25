@@ -1,123 +1,178 @@
-# 🗓️ 生活记录 Bot
+# 生活记录 Bot
 
-飞书 Bot：语音/文字记录每天经历，自动写入日历，按项目查询时间线。
+飞书 Bot：语音/文字记录每天经历，自动写入日历，按项目查询时间线（文字+图片）。
 
-## 零服务器方案
+## 架构
 
 ```
-GitHub（托管代码） → Vercel（免费运行 + HTTPS域名） → 飞书日历
+语音/文字 → 飞书 → 阿里云函数计算（FC）→ 多维表格（Base）存储 + 日历写入 → 回复确认
+                                              ↓
+                                        查询时 → 从 Base 读取 → 文字时间线 + 图片时间轴
 ```
 
 ---
 
-## 一、GitHub 部署代码
+## 一、代码部署到阿里云函数计算（FC）
 
-### 1.1 创建 GitHub 仓库
+### 1.1 安装 Serverless Devs
 
-打开 [github.com](https://github.com) → 点 `+` → `New repository` → 名称随便填（如 `life-timeline-bot`）→ 公开/私有都可以 → `Create repository`
-
-### 1.2 上传代码
-
-在终端执行（替换 `<你的用户名>`）：
+打开终端（PowerShell），运行：
 
 ```bash
-cd D:\Program Files\life-timeline-bot
-
-git init
-git add .
-git commit -m "init"
-git remote add origin https://github.com/<你的用户名>/life-timeline-bot.git
-git branch -M main
-git push -u origin main
+npm install @serverless-devs/s -g
 ```
 
-> 如果没装 Git：去 https://git-scm.com/downloads/win 下载安装
+> 如果没装 Node.js：去 https://nodejs.org 下载 LTS 版安装
 
----
+### 1.2 配置阿里云账号
 
-## 二、部署到 Vercel（免费）
+```bash
+s config add
+```
 
-### 2.1 注册 Vercel
+按提示输入：
+- **Aliyun Access Key ID** 和 **Aliyun Access Key Secret**
+  - 去 https://ram.console.aliyun.com/manage/ak 获取（或创建）
+- **Account ID**：你的阿里云主账号 ID
+  - 去控制台右上角头像 → 「安全设置」→ 查看「账号 ID」
 
-打开 [vercel.com](https://vercel.com) → 点 `Sign Up` → **用 GitHub 登录**（最方便）
+### 1.3 配置环境变量
 
-### 2.2 导入仓库导入
-
-登录后点 `Add New...` → `Project` → 找到 `life-timeline-bot` → `Import`
-
-### 2.3 配置环境变量
-
-在部署页面点 `Environment Variables`，添加以下 6 个：
-
-| Name | Value |
-|------|-------|
-| `FEISHU_APP_ID` | `cli_aa8b536a13791cb5` |
-| `FEISHU_APP_SECRET` | `e1IB8HDhsuDu5Ze6v5eXrlCxOmItQg5K` |
-| `FEISHU_BASE_TOKEN` | `T35sbKGYga8LF0szmECc72pOnbb` |
-| `FEISHU_EVENT_TABLE_ID` | `tblFHJR46ABafFCh` |
-| `FEISHU_PROJECT_TABLE_ID` | `tblKk3IrM28O25X3` |
-| `FEISHU_CALENDAR_ID` | （留空自动用主日历） |
-
-不要勾选 "Use in Preview" 和 "Use in Development"，只勾 **Production**
-
-### 2.4 部署
-
-点 `Deploy` → 等待 ~1 分钟 → 部署完成后会显示一个 URL，类似：
+在项目目录创建 `.env` 文件（或者直接设置系统环境变量）：
 
 ```
-https://life-timeline-bot.vercel.app
+FEISHU_APP_ID=cli_aa8b536a13791cb5
+FEISHU_APP_SECRET=e1IB8HDhsuDu5Ze6v5eXrlCxOmItQg5K
+FEISHU_BASE_TOKEN=你Base的token
+FEISHU_EVENT_TABLE_ID=你事件表的table_id
+FEISHU_PROJECT_TABLE_ID=你项目表的table_id
+FEISHU_CALENDAR_ID=
+```
+
+> `FEISHU_CALENDAR_ID` 留空会自动用主日历
+
+### 1.4 部署
+
+```bash
+cd "D:\Program Files\life-timeline-bot"
+s deploy
+```
+
+等待约 2 分钟（第一次会安装依赖包并打包上传）。部署完成会输出一个**公网 URL**，类似：
+
+```
+https://bot-handler-xxxx.cn-hangzhou.fcapp.run
 ```
 
 **复制这个 URL，下一步要用。**
 
 ---
 
-## 三、配置飞书应用
+## 二、创建多维表格（Base）
 
-打开 [飞书开发者后台](https://open.feishu.cn/app) → 点击应用 `cli_aa8b536a13791cb5`
+### 2.1 新建 Base
 
-### 3.1 开通权限
+1. 打开飞书 → 左侧点「多维表格」
+2. 点「新建」→ 选择「空白多维表格」
+3. 名称填「生活记录」
+4. 创建成功后，浏览器地址栏的 URL 是 `https://xxx.feishu.cn/base/XXXXXXXXXXXXX`
+   - **复制最后那串 27 位的 token**（例如 `T35sbKGYga8LF0szmECc72pOnbb`）
 
-左侧 → `权限管理` → 搜索并开通以下权限（每个点「开通」）：
+### 2.2 建「项目表」
 
-- `im:message`（收发消息）
-- `im:message:send_as_bot`（以 bot 身份发消息）  
-- `calendar:calendar`（读写日历）
-- `calendar:calendar.event`（管理日历事件）
-- `speech_to_text`（语音转文字）
-- `drive:drive`（上传图片）
-- `drive:drive:upload`（上传文件）
+1. 在 Base 底部点「+」新建一个数据表
+2. 表名改「项目表」
+3. 创建字段：
 
-### 3.2 配置事件订阅
+| 字段名 | 字段类型 |
+|--------|---------|
+| 项目名称 | 文本 |
+| 别名 | 文本 |
 
-左侧 → `事件与回调` → `回调配置`
+4. 添加几条项目数据（这是自动归类用的"字典"）：
 
-- 回调 URL 填：`https://<vercel域名>/webhook/event`
-  - 例：`https://life-timeline-bot.vercel.app/webhook/event`
+| 项目名称 | 别名 |
+|---------|------|
+| 考驾照 | 学车,驾照,科二,科三 |
+| 找工作 | 面试,offer,招聘 |
+| 健身 | 拉背,卧推,跑步 |
+| 法务 | 法院,诉讼,律师 |
+| 学习 | 看书,听课,复习 |
 
-点「保存」→ 如果能保存成功说明连通了
+### 2.3 建「事件表」
 
-### 3.3 添加事件
+1. 再点「+」建一个表，表名改「事件表」
+2. 创建字段：
 
-还是在 `事件与回调` → `添加事件`：
+| 字段名 | 字段类型 | 备注 |
+|--------|---------|------|
+| 日期时间 | 日期 | 格式选 `yyyy-MM-dd HH:mm` |
+| 结束时间 | 日期 | 格式选 `yyyy-MM-dd HH:mm`，可选 |
+| 事件内容 | 文本 | |
+| 原始消息 | 文本 | |
+| 项目标签 | 关联 | 关联到「项目表」的「项目名称」，打开多选 |
 
-- 搜索 `im.message.receive_v1` → 添加
+### 2.4 拿到配置值
 
-### 3.4 添加机器人能力
-
-左侧 → `应用功能` → `机器人` → 开启
-
-### 3.5 发布应用
-
-左侧 → `版本管理与发布` → `创建版本` → 填写版本号（如 `1.0.0`）和更新说明 → `保存` → `发布`
-
-> 发布需要审核，约 1 分钟 → 在飞书搜索应用名就可以发消息了
+| 名称 | 从哪拿 |
+|------|--------|
+| base_app_token | Base URL 里那段 27 位字符串 |
+| event_table_id | 点进事件表，URL 里有 `?table=tblxxxxx` |
+| project_table_id | 点进项目表，URL 里有 `?table=tblxxxxx` |
 
 ---
 
-## 四、测试效果
+## 三、配置飞书应用
 
-在飞书搜索你的 Bot → 发消息：
+打开 https://open.feishu.cn/app → 点应用 `cli_aa8b536a13791cb5`
+
+### 3.1 开通权限
+
+左侧 → 权限管理 → 搜索并开通以下权限：
+
+| 权限 | 说明 |
+|------|------|
+| `im:message` | 收发消息 |
+| `im:message:send_as_bot` | 以 bot 身份发消息 |
+| `calendar:calendar` | 读写日历 |
+| `calendar:calendar.event` | 管理日历事件 |
+| `speech_to_text` | 语音转文字 |
+| `bitable:app` | 读写多维表格 |
+| `drive:drive` | 上传图片 |
+
+### 3.2 配置事件回调
+
+左侧 → 事件与回调 → 回调配置
+
+- 回调 URL 填：`https://你的FC域名/webhook/event`
+  - 例如：`https://bot-handler-xxxx.cn-hangzhou.fcapp.run/webhook/event`
+- 点「保存」
+
+### 3.3 添加事件
+
+左侧 → 事件与回调 → 点「添加事件」→ 搜索 `im.message.receive_v1` → 添加
+
+### 3.4 开启机器人
+
+左侧 → 应用功能 → 机器人 → 开启
+
+### 3.5 发布应用
+
+左侧 → 版本管理与发布 → 创建版本 → 版本号 `1.0.0` → 保存 → 发布
+
+> 审核约 1 分钟。通过后在飞书搜索应用名就可以发消息了。
+
+### 3.6 分享 Base 给机器人
+
+1. 打开刚才创建的 Base（飞书里点「多维表格」→ 找「生活记录」）
+2. 右上角点「共享」
+3. 搜索你的机器人应用名称 → 添加为「编辑者」
+
+---
+
+## 四、测试
+
+在飞书里找到你的 Bot，发消息：
 
 ```
 4.22学了科目二半天
@@ -132,39 +187,48 @@ https://life-timeline-bot.vercel.app
 🏷 考驾照
 ```
 
-打开飞书日历 → 4月22日 → 看到这条事件 ✅
-
-查询：
+查时间线：
 
 ```
 学车时间线
 ```
 
-收到时间线回复。
+收到文字时间线 + 图片时间轴。
+
+**支持的输入格式：**
+
+| 输入示例 | 效果 |
+|---------|------|
+| `4.22学了科目二半天` | 4月22日全天 |
+| `4.22号10点面了xx公司` | 4月22日 10:00 |
+| `今天10点到12点练车` | 今天 10:00-12:00 |
+| `昨天下午3点去法院立案` | 昨天 15:00 + 归入法务 |
+| `考驾照时间线` | 显示考驾照的所有记录+时间轴图片 |
+| `健身时间轴` | 显示健身记录 |
 
 ---
 
 ## 五、调试
 
-访问 `https://<vercel域名>/health` 会返回 `{"status": "ok"}`
-
-如果 Bot 没响应，检查：
-1. Vercel 的日志：Vercel Dashboard → Project → Deployments → 点最新部署 → `Functions` → 看最近调用
-2. 飞书开发者后台 → `事件与回调` → 查看最近回调记录
+- **健康检查**：访问 `https://你的FC域名/health` → 返回 `{"status": "ok"}`
+- **查看日志**：`s logs -t`（在项目目录运行）
+- **重新部署**：改完代码后运行 `s deploy`
+- **飞书回调日志**：开发者后台 → 事件与回调 → 查看最近记录
 
 ---
 
-## 六、将 Base 分享给机器人
+## 六、自定义项目归类
 
-Bot 代码运行在 Vercel 上，使用 app_id+app_secret（bot 身份）访问飞书 API。Base 需要授权给 bot 才能读写：
+编辑 `src/nlp.py` 里的 `projects` 关键词配置，或者在 FC 环境变量中传入自定义 JSON。
 
-1. 打开 Base 链接：**https://my.feishu.cn/base/T35sbKGYga8LF0szmECc72pOnbb**
-2. 点右上角「共享」
-3. 搜索你的机器人应用名称 → 添加为「编辑者」
-4. 保存
+## 七、文件说明
 
-## 七、配置自定义项目归类
-
-编辑 `config/config.example.yaml` 里的 `projects` 段，可以自定义项目关键词。
-
-在 Vercel 上部署时如果改了关键词，手动更新 `src/nlp.py` 里的 `_match_project` 函数用到的配置，或者通过环境变量传入 JSON。
+| 文件 | 用途 |
+|------|------|
+| `src/bot.py` | Flask Webhook 主入口，处理消息收发 |
+| `src/feishu_client.py` | 飞书 API 封装（语音识别、消息、Base、日历） |
+| `src/nlp.py` | NLP 解析（日期提取、项目匹配） |
+| `src/timeline.py` | 时间线生成（文字 + matplotlib 图片） |
+| `fc_handler.py` | 阿里云 FC 入口 |
+| `s.yaml` | Serverless Devs 部署配置 |
+| `config/config.yaml` | 本地配置（不提交到 Git） |

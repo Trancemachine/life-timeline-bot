@@ -5,3 +5,6 @@ config/config.yaml
 temp_*.json
 *.swp
 .DS_Store
+.s/
+.s_cache/
+*.egg-info/

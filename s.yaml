@@ -1,0 +1,51 @@
+# Serverless Devs 部署配置 — 阿里云函数计算 FC2.0
+# 使用教程：
+#   1. 安装：npm install @serverless-devs/s -g
+#   2. 配置：s config add（输入阿里云 AK / SK）
+#   3. 部署：s deploy
+#   4. 查日志：s logs -t
+
+edition: 1.0.0
+name: life-timeline-bot
+access: default
+
+services:
+  bot:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service:
+        name: life-timeline-bot
+        description: 生活记录 Bot - 语音/文字记录每天经历
+        internetAccess: true
+      function:
+        name: bot-handler
+        runtime: python3.9
+        codeUri: ./
+        exclude:
+          - .gitignore
+          - s.yaml
+          - README.md
+          - config/config.yaml
+          - config/config.example.yaml
+          - .git/
+        handler: fc_handler.handler
+        memorySize: 512
+        timeout: 30
+        instanceConcurrency: 10
+        environmentVariables:
+          FEISHU_APP_ID: '{{ env("FEISHU_APP_ID") }}'
+          FEISHU_APP_SECRET: '{{ env("FEISHU_APP_SECRET") }}'
+          FEISHU_BASE_TOKEN: '{{ env("FEISHU_BASE_TOKEN") }}'
+          FEISHU_EVENT_TABLE_ID: '{{ env("FEISHU_EVENT_TABLE_ID") }}'
+          FEISHU_PROJECT_TABLE_ID: '{{ env("FEISHU_PROJECT_TABLE_ID") }}'
+          FEISHU_CALENDAR_ID: '{{ env("FEISHU_CALENDAR_ID") }}'
+      triggers:
+        - name: http-trigger
+          type: http
+          config:
+            authType: anonymous
+            methods:
+              - GET
+              - POST
+              - HEAD
