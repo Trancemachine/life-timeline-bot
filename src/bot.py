@@ -6,15 +6,21 @@ import hashlib
 import json
 import logging
 import os
-from datetime import datetime
+import time
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from flask import Flask, request, jsonify
 
 from config.config import get_config
 from src.feishu_client import FeishuClient
-from src.nlp import parse_message, parse_timeline_query, parse_delete_query, llm_parse
+from src.nlp import parse_message, parse_timeline_query, parse_delete_query, llm_parse, _match_project
 from src.timeline import format_text_timeline, generate_timeline_image
+
+_UTC8 = timezone(timedelta(hours=8))
+
+# 消息去重池：message_id → 处理时间戳（防止 Feishu 超时重试导致重复）
+_processed_ids: dict[str, float] = {}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -86,16 +92,43 @@ def health():
 
 # ── 消息处理核心逻辑 ────────────────────────────────────────
 
+def _is_duplicate(message_id: str) -> bool:
+    """3 秒内同一 message_id 判重，防止 Feishu 超时重试"""
+    now = time.time()
+    if message_id in _processed_ids:
+        if now - _processed_ids[message_id] < 3:
+            logger.info("跳过重复消息: %s", message_id)
+            return True
+    _processed_ids[message_id] = now
+    # 定期清理超过 60 秒的旧 ID
+    for mid in list(_processed_ids.keys()):
+        if now - _processed_ids[mid] > 60:
+            del _processed_ids[mid]
+    return False
+
+
 def _handle_message(event: dict) -> tuple:
     """处理收到的消息"""
     try:
         message = event.get("message", {})
-        sender = event.get("sender", {}).get("sender_id", {})
+        sender_obj = event.get("sender", {})
+        sender = sender_obj.get("sender_id", {})
         chat_type = message.get("chat_type", "p2p")
         message_id = message.get("message_id", "")
+        # 消息去重（防止 Feishu 超时重试导致重复处理）
+        if _is_duplicate(message_id):
+            return jsonify({"code": 0})
         message_type = message.get("message_type", "")
         open_id = sender.get("open_id", "")
         content_raw = message.get("content", "{}")
+
+        # 跳过 bot 自己的消息（防止自回复循环）
+        sender_type = sender_obj.get("sender_type", "") or ""
+        if isinstance(sender_type, dict):
+            sender_type = sender_type.get("type", "")
+        if sender_type in ("app", "bot"):
+            logger.info("跳过 bot 自身的消息")
+            return jsonify({"code": 0})
 
         # 仅处理私聊和 mention 机器人的群聊
         if chat_type != "p2p" and not _is_mention(message, content_raw):
@@ -136,6 +169,13 @@ def _handle_message(event: dict) -> tuple:
                     "发送消息即可自动记录，说「考驾照时间线」查询项目历程。",
                 )
                 return jsonify({"code": 0})
+            elif intent == "record":
+                # 使用 LLM 解析的事件数据
+                events = llm_result.get("events", [])
+                if events:
+                    return _handle_record_event(
+                        message_id, open_id, text, llm_event=events[0]
+                    )
 
         # ── 判断是否是删除请求 ──
         delete_info = parse_delete_query(text)
@@ -155,10 +195,31 @@ def _handle_message(event: dict) -> tuple:
         return jsonify({"code": 0})
 
 
-def _handle_record_event(message_id: str, open_id: str, text: str):
-    """记录一条事件"""
+def _handle_record_event(
+    message_id: str, open_id: str, text: str, llm_event: dict | None = None
+):
+    """记录一条事件。llm_event 不为空时使用 LLM 解析的数据，否则走正则。"""
     # NLP 解析
-    parsed = parse_message(text)
+    if llm_event:
+        ev = llm_event
+        from src.nlp import ParsedEvent
+
+        parsed = ParsedEvent(
+            date_start=ev.get("date_start", ""),
+            date_end=ev.get("date_end"),
+            is_all_day=ev.get("is_all_day", True),
+            content=ev.get("content", "").strip(),
+            raw_content=text,
+            project=None,
+            project_confidence=0.0,
+        )
+        # 对 LLM 提取的内容做项目匹配
+        if parsed.content:
+            proj, conf = _match_project(parsed.content)
+            parsed.project = proj
+            parsed.project_confidence = conf
+    else:
+        parsed = parse_message(text)
 
     # 写 Base
     if BASE_EVENT_TABLE:
@@ -169,12 +230,6 @@ def _handle_record_event(message_id: str, open_id: str, text: str):
         }
         if parsed.date_end:
             fields["结束时间"] = _date_to_millis(parsed.date_end)
-
-        # 写入项目关联（通过项目名称查找记录 ID）
-        if parsed.project:
-            project_record_id = _find_or_create_project(parsed.project)
-            if project_record_id:
-                fields["项目标签"] = [project_record_id]
 
         record = feishu.base_create_record(BASE_EVENT_TABLE, fields)
         if record:
@@ -283,7 +338,7 @@ def _handle_delete_event(message_id: str, open_id: str, delete_info: dict):
         return jsonify({"code": 0})
 
     # 按分数降序，然后按时间降序（删除最近的优先）
-    matched.sort(key=lambda x: (-x[0], -(x[2])))
+    matched.sort(key=lambda x: (-x[0], -(x[1].get("fields", {}).get("开始时间", 0) or 0)))
     best = matched[0][1]
     record_id = best["record_id"]
     fields = best.get("fields", {})
@@ -309,38 +364,54 @@ def _do_delete(message_id: str, record_id: str, date_str: str, content: str):
 
 
 def _handle_timeline_query(message_id: str, open_id: str, project_name: str):
-    """查询并回复项目时间线"""
+    """查询并回复项目时间线（从原始消息关键词匹配，无需项目标签）"""
     if not BASE_EVENT_TABLE:
         feishu.reply_message(message_id, "❌ Base 未配置")
         return jsonify({"code": 0})
 
-    # 在 Base 中按项目名过滤查询
-    project_record_id = _find_project_record_id(project_name)
-    if not project_record_id:
-        feishu.reply_message(
-            message_id, f"📋 未找到「{project_name}」的记录，试试其他关键词？"
-        )
-        return jsonify({"code": 0})
+    # 获取项目的关键词列表
+    cfg = get_config()
+    project_keywords: list[str] = []
+    for proj in cfg.get("projects", []):
+        if proj["name"] == project_name:
+            project_keywords = proj.get("keywords", [])
+            break
 
-    # 查询该项目的所有事件
-    filter_expr = json.dumps(
-        {"field_name": "项目标签", "operator": "is", "value": project_record_id},
-        ensure_ascii=False,
-    )
-    records = feishu.base_list_records(BASE_EVENT_TABLE, filter_expr=filter_expr)
+    if not project_keywords:
+        project_keywords = [project_name]
 
-    if not records:
+    # 查出所有记录，按关键词匹配原始消息
+    all_records = feishu.base_list_records(BASE_EVENT_TABLE, page_size=500)
+
+    if not all_records:
         feishu.reply_message(
             message_id, f"📋 「{project_name}」还没有记录呢"
         )
         return jsonify({"code": 0})
 
-    # 1. 发送文字时间线
-    text_timeline = format_text_timeline(project_name, records)
+    # 按关键词匹配：事件内容 / 原始消息 中包含任意关键词
+    matched = []
+    for rec in all_records:
+        fields = rec.get("fields", {})
+        content = (fields.get("事件内容", "") or fields.get("content", "") or "").strip()
+        raw_msg = (fields.get("原始消息", "") or "").strip()
+        for kw in project_keywords:
+            if kw in content or kw in raw_msg:
+                matched.append(rec)
+                break
+
+    if not matched:
+        feishu.reply_message(
+            message_id, f"📋 「{project_name}」还没有记录呢"
+        )
+        return jsonify({"code": 0})
+
+    # 发送文字时间线
+    text_timeline = format_text_timeline(project_name, matched)
     feishu.reply_message(message_id, text_timeline)
 
-    # 2. 尝试发送图片时间线
-    img_bytes = generate_timeline_image(project_name, records)
+    # 尝试发送图片时间线
+    img_bytes = generate_timeline_image(project_name, matched)
     if img_bytes:
         image_key = feishu.upload_image(img_bytes)
         if image_key:
@@ -427,13 +498,14 @@ def _format_dt_display(dt_str: str) -> str:
 
 
 def _date_to_millis(dt_str: str) -> int:
-    """将日期字符串（如 2026-07-12 15:00）转为毫秒时间戳"""
+    """将日期字符串（如 2026-07-12 15:00）转为毫秒时间戳（UTC+8）"""
     for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
         try:
-            return int(datetime.strptime(dt_str, fmt).timestamp() * 1000)
+            dt = datetime.strptime(dt_str, fmt).replace(tzinfo=_UTC8)
+            return int(dt.timestamp() * 1000)
         except ValueError:
             continue
-    return int(datetime.now().timestamp() * 1000)
+    return int(datetime.now(_UTC8).timestamp() * 1000)
 
 
 def _is_mention(message: dict, content_raw: str) -> bool:

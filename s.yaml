@@ -30,7 +30,6 @@ services:
           - .gitignore
           - s.yaml
           - README.md
-          - config/config.yaml
           - config/config.example.yaml
           - .git/
           - "*.pyc"
@@ -39,13 +38,6 @@ services:
         memorySize: 512
         timeout: 120
         instanceConcurrency: 10
-        environmentVariables:
-          FEISHU_APP_ID: '{{ env("FEISHU_APP_ID") }}'
-          FEISHU_APP_SECRET: '{{ env("FEISHU_APP_SECRET") }}'
-          FEISHU_BASE_TOKEN: '{{ env("FEISHU_BASE_TOKEN") }}'
-          FEISHU_EVENT_TABLE_ID: '{{ env("FEISHU_EVENT_TABLE_ID") }}'
-          FEISHU_PROJECT_TABLE_ID: '{{ env("FEISHU_PROJECT_TABLE_ID") }}'
-          FEISHU_CALENDAR_ID: '{{ env("FEISHU_CALENDAR_ID") }}'
       triggers:
         - name: http-trigger
           type: http

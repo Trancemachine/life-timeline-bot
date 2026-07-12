@@ -6,6 +6,24 @@ import os
 import yaml
 from typing import Any
 
+# ── 加载 .env 文件到环境变量 ─────────────────────────────
+_dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+if os.path.isfile(_dotenv_path):
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(_dotenv_path, override=False)
+    except ImportError:
+        # 手动 fallback 解析 .env
+        with open(_dotenv_path, encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _v = _line.split("=", 1)
+                    _k, _v = _k.strip(), _v.strip()
+                    if _k not in os.environ:
+                        os.environ[_k] = _v
+
 
 def load_config(path: str | None = None) -> dict[str, Any]:
     """加载配置，优先加载 config.yaml，fallback 到环境变量"""
@@ -29,6 +47,8 @@ def load_config(path: str | None = None) -> dict[str, Any]:
         "event_table_id": "FEISHU_EVENT_TABLE_ID",
         "project_table_id": "FEISHU_PROJECT_TABLE_ID",
         "calendar_id": "FEISHU_CALENDAR_ID",
+        "anthropic_api_key": "ANTHROPIC_API_KEY",
+        "anthropic_base_url": "ANTHROPIC_BASE_URL",
     }
     for key, env_key in env_overrides.items():
         if env_val := os.environ.get(env_key):

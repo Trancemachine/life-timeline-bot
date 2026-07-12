@@ -52,10 +52,19 @@ def _system_prompt() -> str:
 
 
 def _call_llm(text: str, max_tokens: int = 4096, timeout: int = 30, system: str = None):
+    # 优先环境变量，回退到 config.yaml
+    try:
+        from config.config import get_config
+        _cfg = get_config()
+    except Exception:
+        _cfg = {}
+
     api_key = (os.environ.get("ANTHROPIC_API_KEY")
                or os.environ.get("ANRHROPIC_API_KEY")
-               or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
-    base_url = os.environ.get("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic")
+               or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+               or _cfg.get("anthropic_api_key", ""))
+    base_url = (os.environ.get("ANTHROPIC_BASE_URL")
+                or _cfg.get("anthropic_base_url", "https://api.deepseek.com/anthropic"))
     model = os.environ.get("LLM_MODEL", "deepseek-chat")
 
     if not api_key:

@@ -203,10 +203,11 @@ class FeishuClient:
             payload["end"] = {"date": end_time or start_time, "timezone": "Asia/Shanghai"}
             payload["is_all_day"] = True
         else:
-            payload["start"] = {"date": start_time[:10], "timestamp": self._to_ts(start_time)}
+            payload["start"] = {"date": start_time[:10], "timestamp": str(self._to_ts(start_time)), "timezone": "Asia/Shanghai"}
             payload["end"] = {
                 "date": (end_time or start_time)[:10],
-                "timestamp": self._to_ts(end_time or start_time),
+                "timestamp": str(self._to_ts(end_time or start_time)),
+                "timezone": "Asia/Shanghai",
             }
 
         resp = requests.post(url, json=payload, headers=self._headers(), timeout=10)
@@ -228,13 +229,15 @@ class FeishuClient:
 
     @staticmethod
     def _to_ts(dt_str: str) -> int:
-        """将日期时间字符串转为时间戳"""
-        from datetime import datetime
+        """将日期时间字符串转为时间戳（UTC+8）"""
+        from datetime import datetime, timezone, timedelta
 
+        _tz = timezone(timedelta(hours=8))
         for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
             try:
-                return int(datetime.strptime(dt_str, fmt).timestamp())
+                dt = datetime.strptime(dt_str, fmt).replace(tzinfo=_tz)
+                return int(dt.timestamp())
             except ValueError:
                 continue
         # fallback: 默认当天
-        return int(datetime.now().timestamp())
+        return int(datetime.now(_tz).timestamp())

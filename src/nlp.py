@@ -56,16 +56,19 @@ def parse_timeline_query(text: str) -> Optional[str]:
     """
     text = text.strip()
 
-    # "时间线" / "时间轴" / "timeline" / "历程" / "时间表"
+    # "查一下XX" / "查看XX" / "给出XX" / "展示XX" - 优先检查带前缀的，避免前缀被当成项目名
+    m = re.search(r"(?:查[看一]?下?|看看|显示|列出|给出|展示)\s*(.+)", text)
+    if m:
+        candidate = m.group(1).strip()
+        # 去掉尾部的"时间线"等关键词
+        candidate = re.sub(r"(?:时间线|时间轴|timeline|历程|时间表)\s*$", "", candidate).strip()
+        return candidate if len(candidate) <= 10 else None
+
+    # "XX时间线" / "XX历程" / "XX时间轴" / "XXtimeline"
     m = re.search(r"(.+?)(?:时间线|时间轴|timeline|历程|时间表)", text, re.I)
     if m:
         candidate = m.group(1).strip()
         return candidate if len(candidate) <= 10 else None
-
-    # "查一下XX" / "查看XX"
-    m = re.search(r"(?:查[看一]?下?|看看|显示|列出)\s*(.+)", text)
-    if m:
-        return m.group(1).strip()
 
     return None
 
