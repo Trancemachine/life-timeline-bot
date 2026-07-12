@@ -12,6 +12,10 @@ access: default
 services:
   bot:
     component: devsapp/fc
+    actions:
+      pre-deploy:
+        - run: "pip install --platform manylinux2014_x86_64 --target ./_deps --implementation cp --python-version 39 --only-binary=:all: -r requirements-fc.txt"
+          path: ./
     props:
       region: cn-hangzhou
       service:
@@ -29,9 +33,11 @@ services:
           - config/config.yaml
           - config/config.example.yaml
           - .git/
+          - "*.pyc"
+          - requirements.txt
         handler: fc_handler.handler
         memorySize: 512
-        timeout: 30
+        timeout: 120
         instanceConcurrency: 10
         environmentVariables:
           FEISHU_APP_ID: '{{ env("FEISHU_APP_ID") }}'

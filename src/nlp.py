@@ -1,9 +1,11 @@
 """NLP 解析：从用户消息中提取日期时间、事件内容、项目归类"""
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Optional
 
 from config.config import get_config
 
@@ -15,11 +17,11 @@ class ParsedEvent:
     """解析结果"""
 
     date_start: str  # "2025-04-22" 或 "2025-04-22 10:00"
-    date_end: str | None  # "2025-04-22 12:00" 或 None
+    date_end: Optional[str]  # "2025-04-22 12:00" 或 None
     is_all_day: bool  # 是否全天事件
     content: str  # 事件描述（去除日期前缀）
     raw_content: str  # 原始内容
-    project: str | None  # 匹配到的项目名
+    project: Optional[str]  # 匹配到的项目名
     project_confidence: float  # 匹配置信度 0-1
 
 
@@ -47,7 +49,7 @@ def parse_message(text: str) -> ParsedEvent:
     )
 
 
-def parse_timeline_query(text: str) -> str | None:
+def parse_timeline_query(text: str) -> Optional[str]:
     """
     判断是否是查询时间线请求。
     返回匹配到的项目名，如果不是查询请求则返回 None。
@@ -68,7 +70,7 @@ def parse_timeline_query(text: str) -> str | None:
     return None
 
 
-def _extract_datetime(text: str) -> tuple[str, str | None, bool, str]:
+def _extract_datetime(text: str) -> tuple[str, Optional[str], bool, str]:
     """
     从文本中提取日期时间和范围，返回:
     (date_start, date_end, is_all_day, rest_text)
@@ -185,7 +187,7 @@ def _relative_date(rel: str, today: datetime) -> datetime:
     return today + timedelta(days=mapping.get(rel, 0))
 
 
-def _match_project(content: str) -> tuple[str | None, float]:
+def _match_project(content: str) -> tuple[Optional[str], float]:
     """
     通过关键词匹配项目。
     返回 (project_name, confidence)，confidence 0-1
@@ -213,3 +215,98 @@ def _match_project(content: str) -> tuple[str | None, float]:
                 best_project = name
 
     return best_project, min(best_score, 1.0)
+
+# ── LLM 意图解析（新增，不干涉现有逻辑） ───────────────
+
+def llm_parse(text: str) -> Optional[dict]:
+    """调用 LLM 解析意图，返回结构化结果；LLM 不可用时返回 None"""
+    try:
+        from src.llm import parse as _llm_parse
+        result = _llm_parse(text)
+        # query 意图的项目名做关键词匹配（对齐项目配置）
+        if result.get("intent") == "query":
+            project = result.get("project", "")
+            if project:
+                cfg = get_config()
+                for proj in cfg.get("projects", []):
+                    name = proj["name"]
+                    if name in project or project in name:
+                        result["project"] = name
+                        break
+                    for kw in proj.get("keywords", []):
+                        if kw in project:
+                            result["project"] = name
+                            break
+                    if result.get("project") == name:
+                        break
+        return result
+    except Exception:
+        return None
+
+def parse_delete_query(text: str) -> Optional[dict]:
+    """
+    判断是否是删除请求。
+    返回格式:
+      {"date": "2026-07-12" | None, "keywords": [...], "project": "..." | None}
+    如果不是删除请求则返回 None。
+    """
+    text = text.strip()
+
+    # 删除关键词
+    m = re.match(
+        r"(?:删除|删掉|取消|移除|抹掉)\s*(.+)?", text
+    )
+    if not m:
+        # "把X删掉" / "把X删除" 格式
+        m = re.match(r"把\s*(.+?)\s*(?:删除|删掉|移除|取消)", text)
+    if not m:
+        return None
+
+    target = (m.group(1) or "").strip()
+    if not target:
+        # 纯"删除"不带关键词 → 删除最近一条
+        return {"date": None, "keywords": [], "project": None}
+
+    # 尝试提取日期
+    date_start, _, _, rest = _extract_datetime(target)
+    keywords_raw = rest.strip()
+
+    # 清理关键词：去掉 "的记录" "记录" "的东西" 等后缀
+    keywords_raw = re.sub(r"的(?:记录|事件|东西|那个|这个)?$", "", keywords_raw).strip()
+
+    # 尝试匹配项目
+    project_name = None
+    project_keywords = []
+    cfg = get_config()
+    for proj in cfg.get("projects", []):
+        name = proj["name"]
+        kws = proj.get("keywords", [])
+        for kw in kws:
+            if kw in target:
+                project_name = name
+                project_keywords = kws
+                break
+        if project_name:
+            break
+
+    # 如果提取日期后没剩有效关键词，用原目标
+    if not keywords_raw:
+        keywords_raw = target
+
+    # 生成搜索关键词：用户输入的关键词 + 项目关键词
+    search_kws = []
+    for kw in re.split(r'[,，、\s]+', keywords_raw):
+        kw = kw.strip()
+        if kw and len(kw) >= 2:
+            search_kws.append(kw)
+    # 补充项目关键词（如果项目已匹配且用户输入较短）
+    if project_name and len(search_kws) <= 1:
+        for pk in project_keywords:
+            if pk not in search_kws:
+                search_kws.append(pk)
+
+    return {
+        "date": date_start if date_start else None,
+        "keywords": search_kws,
+        "project": project_name,
+    }

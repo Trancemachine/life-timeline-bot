@@ -8,3 +8,4 @@ temp_*.json
 .s/
 .s_cache/
 *.egg-info/
+_deps/

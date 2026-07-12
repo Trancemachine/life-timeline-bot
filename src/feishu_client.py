@@ -1,10 +1,12 @@
 """飞书 API 客户端封装"""
 
+from __future__ import annotations
+
 import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 import requests
 
@@ -52,7 +54,7 @@ class FeishuClient:
 
     # ── 语音识别 ────────────────────────────────────────────
 
-    def speech_to_text(self, file_key: str, duration: int) -> str | None:
+    def speech_to_text(self, file_key: str, duration: int) -> Optional[str]:
         """飞书语音转文字"""
         url = f"{self._base_url}/speech_to_text/v1/speech/file_recognize"
         payload = {
@@ -102,7 +104,7 @@ class FeishuClient:
 
     # ── 图片上传 ────────────────────────────────────────────
 
-    def upload_image(self, image_data: bytes) -> str | None:
+    def upload_image(self, image_data: bytes) -> Optional[str]:
         """上传图片到飞书，返回 image_key"""
         url = f"{self._base_url}/im/v1/images"
         token = self._ensure_token()
@@ -119,7 +121,7 @@ class FeishuClient:
 
     # ── Base (多维表格) 操作 ─────────────────────────────────
 
-    def base_list_records(self, table_id: str, page_size: int = 500, filter_expr: str | None = None) -> list[dict]:
+    def base_list_records(self, table_id: str, page_size: int = 500, filter_expr: Optional[str] = None) -> list[dict]:
         """列出 Base 表中的记录"""
         url = f"{self._base_url}/bitable/v1/apps/{self._base_token}/tables/{table_id}/records"
         params = {"page_size": min(page_size, 500)}
@@ -144,7 +146,7 @@ class FeishuClient:
 
         return all_records
 
-    def base_create_record(self, table_id: str, fields: dict[str, Any]) -> dict | None:
+    def base_create_record(self, table_id: str, fields: dict[str, Any]) -> Optional[dict]:
         """在 Base 表中创建记录"""
         url = f"{self._base_url}/bitable/v1/apps/{self._base_token}/tables/{table_id}/records"
         payload = {"fields": fields}
@@ -155,7 +157,18 @@ class FeishuClient:
         logger.error("Base 创建记录失败: %s", data)
         return None
 
-    def base_get_record(self, table_id: str, record_id: str) -> dict | None:
+    def base_delete_record(self, table_id: str, record_id: str) -> bool:
+        """删除 Base 单条记录"""
+        url = f"{self._base_url}/bitable/v1/apps/{self._base_token}/tables/{table_id}/records/{record_id}"
+        resp = requests.delete(url, headers=self._headers(), timeout=10)
+        data = resp.json()
+        if data.get("code") == 0:
+            logger.info("Base 记录已删除: %s", record_id)
+            return True
+        logger.error("Base 删除记录失败: %s", data)
+        return False
+
+    def base_get_record(self, table_id: str, record_id: str) -> Optional[dict]:
         """获取 Base 单条记录"""
         url = f"{self._base_url}/bitable/v1/apps/{self._base_token}/tables/{table_id}/records/{record_id}"
         resp = requests.get(url, headers=self._headers(), timeout=10)
@@ -171,7 +184,7 @@ class FeishuClient:
         summary: str,
         description: str,
         start_time: str,
-        end_time: str | None = None,
+        end_time: Optional[str] = None,
         is_all_day: bool = False,
     ):
         """创建日历事件"""

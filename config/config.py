@@ -1,5 +1,7 @@
 """配置管理"""
 
+from __future__ import annotations
+
 import os
 import yaml
 from typing import Any

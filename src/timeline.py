@@ -1,9 +1,11 @@
 """时间线生成：文本格式 + 图片格式"""
 
+from __future__ import annotations
+
 import io
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional, Union
 
 try:
     import matplotlib
@@ -32,12 +34,12 @@ def format_text_timeline(project: str, records: list[dict]) -> str:
 
     for i, rec in enumerate(sorted_records, 1):
         fields = rec["fields"]
-        dt_str = fields.get("日期时间", "") or fields.get("date_time", "")
+        dt_raw = fields.get("开始时间", 0) or 0
         content = fields.get("事件内容", "") or fields.get("content", "")
 
-        if dt_str:
-            # 格式化显示
-            display = _format_dt_display(dt_str)
+        dt = _parse_dt(dt_raw)
+        if dt:
+            display = _format_dt_display(dt.isoformat())
             lines.append(f"  {display}  {content}")
         else:
             lines.append(f"  {content}")
@@ -66,14 +68,14 @@ def _format_dt_display(dt_str: str) -> str:
 
 
 def _get_sort_key(fields: dict) -> str:
-    dt = fields.get("日期时间", "") or fields.get("date_time", "") or ""
+    dt = fields.get("开始时间", 0) or 0
     # 处理飞书日期格式 (int 时间戳或字符串)
     if isinstance(dt, (int, float)):
         return datetime.fromtimestamp(dt / 1000).isoformat()
     return str(dt)
 
 
-def generate_timeline_image(project: str, records: list[dict]) -> bytes | None:
+def generate_timeline_image(project: str, records: list[dict]) -> Optional[bytes]:
     """
     生成时间轴图片，返回 PNG bytes。
     如果 matplotlib 不可用则返回 None。
@@ -85,7 +87,7 @@ def generate_timeline_image(project: str, records: list[dict]) -> bytes | None:
     events = []
     for rec in records:
         fields = rec["fields"]
-        dt_raw = fields.get("日期时间", "") or fields.get("date_time", "")
+        dt_raw = fields.get("开始时间", 0) or 0
         content = fields.get("事件内容", "") or fields.get("content", "")
         dt = _parse_dt(dt_raw)
         if dt:
@@ -158,7 +160,7 @@ def generate_timeline_image(project: str, records: list[dict]) -> bytes | None:
     return buf.read()
 
 
-def _parse_dt(dt_raw: str | int | float | None) -> datetime | None:
+def _parse_dt(dt_raw: Optional[Union[str, int, float]]) -> Optional[datetime]:
     if dt_raw is None:
         return None
     if isinstance(dt_raw, (int, float)):
