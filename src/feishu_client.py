@@ -213,12 +213,12 @@ class FeishuClient:
         if remind_before:
             payload["remind"] = {"minutes": remind_before}
         if is_all_day:
-            payload["start"] = {"date": start_time, "timezone": "Asia/Shanghai"}
-            payload["end"] = {"date": end_time or start_time, "timezone": "Asia/Shanghai"}
+            payload["start_time"] = {"date": start_time, "timezone": "Asia/Shanghai"}
+            payload["end_time"] = {"date": end_time or start_time, "timezone": "Asia/Shanghai"}
             payload["is_all_day"] = True
         else:
-            payload["start"] = {"date": start_time[:10], "timestamp": str(self._to_ts(start_time)), "timezone": "Asia/Shanghai"}
-            payload["end"] = {
+            payload["start_time"] = {"date": start_time[:10], "timestamp": str(self._to_ts(start_time)), "timezone": "Asia/Shanghai"}
+            payload["end_time"] = {
                 "date": (end_time or start_time)[:10],
                 "timestamp": str(self._to_ts(end_time or start_time)),
                 "timezone": "Asia/Shanghai",
@@ -227,9 +227,25 @@ class FeishuClient:
         resp = requests.post(url, json=payload, headers=self._headers(), timeout=10)
         data = resp.json()
         if data.get("code") == 0:
-            return data["data"]
+            event = data.get("data", {})
+            logger.info("日历事件已创建: %s", event.get("event_id", ""))
+            return event
         logger.error("创建日历事件失败: %s", data)
         return None
+
+    def delete_calendar_event(self, event_id: str) -> bool:
+        """删除日历事件"""
+        calendar_id = get_config().get("calendar_id") or ""
+        if not calendar_id:
+            return False
+        url = f"{self._base_url}/calendar/v4/calendars/{calendar_id}/events/{event_id}"
+        resp = requests.delete(url, headers=self._headers(), timeout=10)
+        data = resp.json()
+        if data.get("code") == 0:
+            logger.info("日历事件已删除: %s", event_id)
+            return True
+        logger.error("删除日历事件失败: %s", data)
+        return False
 
     def _get_primary_calendar(self) -> str:
         """获取用户主日历 ID"""

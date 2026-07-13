@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -61,28 +62,36 @@ def event_callback():
     处理：
       - im.message.receive_v1: 接收消息
       - url_verify: 验证
+    立即返回 200，异步处理，防止飞书超时重试。
     """
     data = request.get_json(force=True, silent=True) or {}
 
-    # URL 验证
+    # URL 验证 — 需同步响应
     if data.get("type") == "url_verify":
         challenge = data.get("challenge")
         return jsonify({"challenge": challenge})
 
-    # 消息事件
-    if data.get("type") == "event_callback" and "event" in data:
-        event = data["event"]
-        event_type = event.get("type")
-
-        if event_type == "im.message.receive_v1":
-            return _handle_message(event)
-
-    # 新版事件回调（v2.0+）
-    header = data.get("header", {})
-    if header.get("event_type") == "im.message.receive_v1":
-        return _handle_message(data.get("event", {}))
-
+    # 立即返回 200，后台处理事件，防飞书超时重试
+    threading.Thread(target=_process_event_async, args=(data,), daemon=True).start()
     return jsonify({"code": 0})
+
+
+def _process_event_async(data: dict):
+    """异步处理飞书事件（后台线程）"""
+    try:
+        # v1 格式
+        if data.get("type") == "event_callback" and "event" in data:
+            event = data["event"]
+            if event.get("type") == "im.message.receive_v1":
+                _handle_message(event)
+                return
+
+        # v2.0+ 格式
+        header = data.get("header", {})
+        if header.get("event_type") == "im.message.receive_v1":
+            _handle_message(data.get("event", {}))
+    except Exception as e:
+        logger.exception("异步事件处理异常")
 
 
 @app.route("/health", methods=["GET"])
@@ -271,8 +280,15 @@ def _handle_record_event(
             feishu.reply_message(message_id, "❌ 记录失败，请稍后重试")
             return jsonify({"code": 0})
 
-    # 写入日历
-    _create_calendar_event(parsed)
+        # 写入日历并存储 event_id
+        cal_event = _create_calendar_event(parsed)
+        if cal_event:
+            cal_event_id = cal_event.get("event_id", "")
+            if cal_event_id and record.get("record_id"):
+                feishu.base_update_record(
+                    BASE_EVENT_TABLE, record["record_id"],
+                    {"日历事件ID": cal_event_id},
+                )
 
     # 回复确认
     date_display = _format_dt_display(parsed.date_start)
@@ -360,7 +376,8 @@ def _handle_delete_event(message_id: str, open_id: str, delete_info: dict):
         fields = best.get("fields", {})
         content = fields.get("事件内容", "") or fields.get("content", "")
         raw_ts = fields.get("开始时间", 0) or 0
-        return _do_delete(message_id, record_id, _ts_to_date(raw_ts), content)
+        cal_id = fields.get("日历事件ID", "") or ""
+        return _do_delete(message_id, record_id, _ts_to_date(raw_ts), content, cal_id)
 
     if not matched:
         feishu.reply_message(
@@ -377,12 +394,17 @@ def _handle_delete_event(message_id: str, open_id: str, delete_info: dict):
     fields = best.get("fields", {})
     content = fields.get("事件内容", "") or fields.get("content", "")
     raw_ts = fields.get("开始时间", 0) or 0
+    cal_id = fields.get("日历事件ID", "") or ""
 
-    return _do_delete(message_id, record_id, _ts_to_date(raw_ts), content)
+    return _do_delete(message_id, record_id, _ts_to_date(raw_ts), content, cal_id)
 
 
-def _do_delete(message_id: str, record_id: str, date_str: str, content: str):
-    """执行删除并回复结果"""
+def _do_delete(message_id: str, record_id: str, date_str: str, content: str,
+              calendar_event_id: str = ""):
+    """执行删除并回复结果，同时删除日历事件"""
+    # 先删日历事件
+    if calendar_event_id:
+        feishu.delete_calendar_event(calendar_event_id)
     success = feishu.base_delete_record(BASE_EVENT_TABLE, record_id)
     if success:
         date_display = _format_dt_display(date_str)
@@ -509,7 +531,7 @@ def _create_calendar_event(parsed):
         summary = parsed.content[:50]
         description = f"📝 {parsed.raw_content}\n🏷 {parsed.project or '未归类'}"
 
-        feishu.create_calendar_event(
+        return feishu.create_calendar_event(
             summary=summary,
             description=description,
             start_time=parsed.date_start,
