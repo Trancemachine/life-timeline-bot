@@ -168,6 +168,17 @@ class FeishuClient:
         logger.error("Base 删除记录失败: %s", data)
         return False
 
+    def base_update_record(self, table_id: str, record_id: str, fields: dict[str, Any]) -> bool:
+        """更新 Base 单条记录"""
+        url = f"{self._base_url}/bitable/v1/apps/{self._base_token}/tables/{table_id}/records/{record_id}"
+        resp = requests.put(url, json={"fields": fields}, headers=self._headers(), timeout=10)
+        data = resp.json()
+        if data.get("code") == 0:
+            logger.info("Base 记录已更新: %s", record_id)
+            return True
+        logger.error("Base 更新记录失败: %s", data)
+        return False
+
     def base_get_record(self, table_id: str, record_id: str) -> Optional[dict]:
         """获取 Base 单条记录"""
         url = f"{self._base_url}/bitable/v1/apps/{self._base_token}/tables/{table_id}/records/{record_id}"

@@ -47,3 +47,24 @@ services:
               - GET
               - POST
               - HEAD
+
+  reminder:
+    component: devsapp/fc
+    props:
+      region: cn-hangzhou
+      service:
+        name: life-timeline-bot
+        internetAccess: true
+      function:
+        name: reminder-handler
+        runtime: python3.9
+        codeUri: ./
+        handler: fc_handler.reminder_handler
+        memorySize: 256
+        timeout: 60
+      triggers:
+        - name: timer-trigger
+          type: timer
+          config:
+            cronExpression: "@every 1m"
+            enable: true
