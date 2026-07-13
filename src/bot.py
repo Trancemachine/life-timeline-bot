@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import os
-import threading
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -62,36 +61,28 @@ def event_callback():
     处理：
       - im.message.receive_v1: 接收消息
       - url_verify: 验证
-    立即返回 200，异步处理，防止飞书超时重试。
     """
     data = request.get_json(force=True, silent=True) or {}
 
-    # URL 验证 — 需同步响应
+    # URL 验证
     if data.get("type") == "url_verify":
         challenge = data.get("challenge")
         return jsonify({"challenge": challenge})
 
-    # 立即返回 200，后台处理事件，防飞书超时重试
-    threading.Thread(target=_process_event_async, args=(data,), daemon=True).start()
+    # 消息事件
+    if data.get("type") == "event_callback" and "event" in data:
+        event = data["event"]
+        event_type = event.get("type")
+
+        if event_type == "im.message.receive_v1":
+            return _handle_message(event)
+
+    # 新版事件回调（v2.0+）
+    header = data.get("header", {})
+    if header.get("event_type") == "im.message.receive_v1":
+        return _handle_message(data.get("event", {}))
+
     return jsonify({"code": 0})
-
-
-def _process_event_async(data: dict):
-    """异步处理飞书事件（后台线程）"""
-    try:
-        # v1 格式
-        if data.get("type") == "event_callback" and "event" in data:
-            event = data["event"]
-            if event.get("type") == "im.message.receive_v1":
-                _handle_message(event)
-                return
-
-        # v2.0+ 格式
-        header = data.get("header", {})
-        if header.get("event_type") == "im.message.receive_v1":
-            _handle_message(data.get("event", {}))
-    except Exception as e:
-        logger.exception("异步事件处理异常")
 
 
 @app.route("/health", methods=["GET"])

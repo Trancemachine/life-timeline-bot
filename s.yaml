@@ -37,7 +37,7 @@ services:
         handler: fc_handler.handler
         memorySize: 1024
         timeout: 120
-        instanceConcurrency: 1
+        instanceConcurrency: 3
       triggers:
         - name: http-trigger
           type: http
