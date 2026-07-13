@@ -30,8 +30,6 @@ def check_and_send() -> int:
 
     now = datetime.now(_UTC8)
     now_ms = int(now.timestamp() * 1000)
-    # 提醒窗口：未来 2 分钟内
-    window_end_ms = now_ms + 120 * 1000
 
     reminded = 0
     for rec in records:
@@ -43,8 +41,8 @@ def check_and_send() -> int:
         if remind != "是" or not remind_time or not user_open_id:
             continue
 
-        # 检查是否在提醒窗口内
-        if now_ms <= remind_time <= window_end_ms:
+        # 检查是否在提醒窗口内（提醒时间在当前时间前后1分钟内，应对定时器延迟）
+        if abs(now_ms - remind_time) <= 60 * 1000:
             content = fields.get("事件内容", "") or fields.get("content", "")
             start_ts = fields.get("开始时间", 0) or 0
 

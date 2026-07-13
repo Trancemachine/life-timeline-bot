@@ -254,6 +254,7 @@ def _handle_record_event(
             "开始时间": _date_to_millis(parsed.date_start),
             "事件内容": parsed.content,
             "原始消息": parsed.raw_content,
+            "用户": open_id,
         }
         if parsed.date_end:
             fields["结束时间"] = _date_to_millis(parsed.date_end)
