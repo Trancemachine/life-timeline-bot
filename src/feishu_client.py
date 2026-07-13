@@ -186,8 +186,9 @@ class FeishuClient:
         start_time: str,
         end_time: Optional[str] = None,
         is_all_day: bool = False,
+        remind_before: Optional[int] = None,
     ):
-        """创建日历事件"""
+        """创建日历事件，可选设置提醒"""
         calendar_id = get_config().get("calendar_id") or ""
         # 如果没有指定 calendar_id，查用户默认日历
         if not calendar_id:
@@ -198,6 +199,8 @@ class FeishuClient:
             "summary": summary,
             "description": description,
         }
+        if remind_before:
+            payload["remind"] = {"minutes": remind_before}
         if is_all_day:
             payload["start"] = {"date": start_time, "timezone": "Asia/Shanghai"}
             payload["end"] = {"date": end_time or start_time, "timezone": "Asia/Shanghai"}

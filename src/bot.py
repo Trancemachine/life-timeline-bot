@@ -514,6 +514,7 @@ def _create_calendar_event(parsed):
             start_time=parsed.date_start,
             end_time=parsed.date_end,
             is_all_day=parsed.is_all_day,
+            remind_before=parsed.remind_before if parsed.remind else None,
         )
     except Exception as e:
         logger.warning("创建日历事件失败（跳过）: %s", e)
