@@ -23,6 +23,8 @@ class ParsedEvent:
     raw_content: str  # 原始内容
     project: Optional[str]  # 匹配到的项目名
     project_confidence: float  # 匹配置信度 0-1
+    remind: bool = False  # 是否需要提醒
+    remind_before: Optional[int] = None  # 提前提醒分钟数（如 5 表示提前5分钟）
 
 
 def parse_message(text: str) -> ParsedEvent:
@@ -61,7 +63,7 @@ def parse_timeline_query(text: str) -> Optional[str]:
     if m:
         candidate = m.group(1).strip()
         # 去掉尾部的"时间线"等关键词
-        candidate = re.sub(r"(?:时间线|时间轴|timeline|历程|时间表)\s*$", "", candidate).strip()
+        candidate = re.sub(r"(?:时间线|时间轴|timeline|历程|时间表|的记录|的进度)\s*$", "", candidate).strip()
         return candidate if len(candidate) <= 10 else None
 
     # "XX时间线" / "XX历程" / "XX时间轴" / "XXtimeline"
@@ -268,6 +270,10 @@ def parse_delete_query(text: str) -> Optional[dict]:
     target = (m.group(1) or "").strip()
     if not target:
         # 纯"删除"不带关键词 → 删除最近一条
+        return {"date": None, "keywords": [], "project": None}
+
+    # "这条记录/这个事件/这个/那条/这个记录" → 删除最近一条（避免把代词当关键词搜）
+    if re.match(r"^(这|那)(条|个|次).{0,4}$", target):
         return {"date": None, "keywords": [], "project": None}
 
     # 尝试提取日期

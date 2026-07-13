@@ -27,11 +27,12 @@ def _system_prompt() -> str:
 【意图类型】
 
 1. record - 记录事件
-   返回格式: {{"intent":"record","events":[{{"date_start":"...","date_end":null,"is_all_day":true,"content":"...","remind":false}}]}}
+   返回格式: {{"intent":"record","events":[{{"date_start":"...","date_end":null,"is_all_day":true,"content":"...","remind":false,"remind_before":null}}]}}
    - 1.7/1月7日/1月7号 = 当年 {year}-01-07
    - 今天={today} 昨天={yesterday} 前天={day_before}
    - 下午3点=15:00 早上9点=09:00 9点半=09:30
    - 没有日期的事件默认日期为今天
+   - remind_before: 提前提醒的分钟数。如"提前五分钟提醒"→5，"提前十分钟"→10。没有提醒要求则为null。
 
 2. query - 查询时间线
    关键信号词：给出、展示、查、查询、看看、时间线、历程、进度

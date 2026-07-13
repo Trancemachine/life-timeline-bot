@@ -19,7 +19,7 @@ from src.timeline import format_text_timeline, generate_timeline_image
 
 _UTC8 = timezone(timedelta(hours=8))
 
-# 消息去重池：message_id → 处理时间戳（防止 Feishu 超时重试导致重复）
+# 消息去重池：message_id → 处理时间戳（同一 FC 实例内快速判重）
 _processed_ids: dict[str, float] = {}
 
 logging.basicConfig(
@@ -93,17 +93,37 @@ def health():
 # ── 消息处理核心逻辑 ────────────────────────────────────────
 
 def _is_duplicate(message_id: str) -> bool:
-    """3 秒内同一 message_id 判重，防止 Feishu 超时重试"""
+    """内存级消息去重：同一 FC 实例内 60 秒防重"""
     now = time.time()
     if message_id in _processed_ids:
-        if now - _processed_ids[message_id] < 3:
+        if now - _processed_ids[message_id] < 60:
             logger.info("跳过重复消息: %s", message_id)
             return True
     _processed_ids[message_id] = now
-    # 定期清理超过 60 秒的旧 ID
+    # 定期清理超过 600 秒的旧 ID
     for mid in list(_processed_ids.keys()):
-        if now - _processed_ids[mid] > 60:
+        if now - _processed_ids[mid] > 600:
             del _processed_ids[mid]
+    return False
+
+
+def _is_duplicate_by_content(raw_content: str, date_start: str) -> bool:
+    """Base 表级去重：跨 FC 实例，用原始消息+开始时间判断是否已记录（10分钟内）"""
+    if not BASE_EVENT_TABLE:
+        return False
+    try:
+        records = feishu.base_list_records(BASE_EVENT_TABLE, page_size=50)
+        raw_stripped = raw_content.strip()
+        now_ms = time.time() * 1000
+        for rec in records:
+            fields = rec.get("fields", {})
+            existing_raw = (fields.get("原始消息", "") or "").strip()
+            if existing_raw == raw_stripped:
+                existing_start = fields.get("开始时间", 0) or 0
+                if existing_start and (now_ms - existing_start) < 600 * 1000:  # 10分钟内
+                    return True
+    except Exception as e:
+        logger.warning("Base 去重查询失败: %s", e)
     return False
 
 
@@ -212,6 +232,8 @@ def _handle_record_event(
             raw_content=text,
             project=None,
             project_confidence=0.0,
+            remind=ev.get("remind", False),
+            remind_before=ev.get("remind_before"),
         )
         # 对 LLM 提取的内容做项目匹配
         if parsed.content:
@@ -223,6 +245,11 @@ def _handle_record_event(
 
     # 写 Base
     if BASE_EVENT_TABLE:
+        # 跨实例去重：检查 Base 中是否已有相同原始消息（防止 Feishu 重试 + FC 多实例）
+        if _is_duplicate_by_content(parsed.raw_content, parsed.date_start):
+            logger.info("跳过已记录的重复内容: %s", parsed.raw_content[:50])
+            return jsonify({"code": 0})
+
         fields = {
             "开始时间": _date_to_millis(parsed.date_start),
             "事件内容": parsed.content,
@@ -230,6 +257,11 @@ def _handle_record_event(
         }
         if parsed.date_end:
             fields["结束时间"] = _date_to_millis(parsed.date_end)
+        if parsed.remind:
+            fields["是否提醒"] = True
+            if parsed.remind_before:
+                remind_ts = _date_to_millis(parsed.date_start) - parsed.remind_before * 60 * 1000
+                fields["提醒时间"] = remind_ts
 
         record = feishu.base_create_record(BASE_EVENT_TABLE, fields)
         if record:

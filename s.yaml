@@ -35,9 +35,9 @@ services:
           - "*.pyc"
           - requirements.txt
         handler: fc_handler.handler
-        memorySize: 512
+        memorySize: 1024
         timeout: 120
-        instanceConcurrency: 10
+        instanceConcurrency: 1
       triggers:
         - name: http-trigger
           type: http
