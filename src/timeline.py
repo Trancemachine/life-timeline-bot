@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 from datetime import datetime
 from typing import Any, Optional, Union
@@ -11,8 +12,24 @@ try:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
+    import matplotlib.font_manager as fm
     from matplotlib.patches import FancyBboxPatch
+
+    # 注册中文字体（Noto Sans SC，从项目 assets/ 目录加载）
+    _font_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "assets", "NotoSansSC-Regular.ttf",
+    )
+    if os.path.isfile(_font_path):
+        fm.fontManager.addfont(_font_path)
+        _CHINESE_FONT = fm.FontProperties(fname=_font_path)
+        # 设为默认字体
+        plt.rcParams["font.family"] = _CHINESE_FONT.get_name()
+        # 对于不支持中文的字符，fallback 到 DejaVu Sans
+        plt.rcParams["font.sans-serif"] = [_CHINESE_FONT.get_name(), "DejaVu Sans"]
+        plt.rcParams["axes.unicode_minus"] = False
+    else:
+        _CHINESE_FONT = None
 
     HAS_MATPLOTLIB = True
 except ImportError:
@@ -109,7 +126,7 @@ def generate_timeline_image(project: str, records: list[dict]) -> Optional[bytes
     ax.text(
         5,
         n + 0.5,
-        f"📋 {project}",
+        f"[ {project} ]",
         ha="center",
         va="center",
         fontsize=16,
