@@ -260,7 +260,7 @@ def _handle_record_event(
         if parsed.remind:
             fields["是否提醒"] = True
             if parsed.remind_before:
-                remind_ts = _date_to_millis(parsed.date_start) - parsed.remind_before * 60 * 1000
+                remind_ts = _date_to_millis(parsed.date_start) // 1000 - parsed.remind_before * 60
                 fields["提醒时间"] = remind_ts
 
         record = feishu.base_create_record(BASE_EVENT_TABLE, fields)
