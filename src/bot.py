@@ -258,7 +258,7 @@ def _handle_record_event(
         if parsed.date_end:
             fields["结束时间"] = _date_to_millis(parsed.date_end)
         if parsed.remind:
-            fields["是否提醒"] = True
+            fields["是否提醒"] = "是"
             if parsed.remind_before:
                 remind_ts = _date_to_millis(parsed.date_start) // 1000 - parsed.remind_before * 60
                 fields["提醒时间"] = remind_ts
